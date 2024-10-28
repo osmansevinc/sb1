@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - STORAGE_TYPE=LOCAL
+      - STORAGE_LOCAL_TEMP_PATH=/tmp/streams
+      # AWS credentials (optional)
+      - AWS_ACCESS_KEY=${AWS_ACCESS_KEY:-}
+      - AWS_SECRET_KEY=${AWS_SECRET_KEY:-}
+      - AWS_BUCKET=${AWS_BUCKET:-}
+      # Azure credentials (optional)
+      - AZURE_CONNECTION_STRING=${AZURE_CONNECTION_STRING:-}
+      - AZURE_CONTAINER=${AZURE_CONTAINER:-}
+      # GCP credentials (optional)
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID:-}
+      - GCP_BUCKET=${GCP_BUCKET:-}
+    volumes:
+      - stream-data:/tmp/streams
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  stream-data:
+  redis-data:
