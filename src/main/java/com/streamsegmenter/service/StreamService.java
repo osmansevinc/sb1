@@ -8,15 +8,16 @@ import org.springframework.scheduling.annotation.Async;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.nio.file.*;
 import java.util.concurrent.*;
 import java.util.List;
 import java.util.UUID;
 import java.util.ArrayList;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Set;
+import java.util.HashSet;
 import java.time.LocalDateTime;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Service
@@ -28,12 +29,14 @@ public class StreamService {
     private final FFmpegService ffmpegService;
     private final ConcurrentHashMap<String, StreamContext> activeStreams = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private final ConcurrentHashMap<String, Set<String>> processedSegments = new ConcurrentHashMap<>();
 
     public CompletableFuture<List<String>> startStream(String streamUrl, List<String> storageTypes,
                                                        VideoQuality quality, LocalDateTime startTime) {
         String streamId = UUID.randomUUID().toString();
         StreamContext context = new StreamContext(streamUrl);
         activeStreams.put(streamId, context);
+        processedSegments.put(streamId, ConcurrentHashMap.newKeySet());
 
         storageManager.registerStreamStorages(streamId, storageTypes);
         CompletableFuture<List<String>> resultFuture = new CompletableFuture<>();
@@ -76,32 +79,45 @@ public class StreamService {
             CompletableFuture<Void> ffmpegFuture = ffmpegService.startStreamProcessing(
                     streamId, streamUrl, segmentPattern, quality);
 
-            // Start monitoring for new segments
-            ScheduledExecutorService segmentMonitor = Executors.newSingleThreadScheduledExecutor();
-            segmentMonitor.scheduleAtFixedRate(() -> {
-                if (!context.isActive()) {
-                    segmentMonitor.shutdown();
-                    return;
-                }
+            // Create WatchService for directory monitoring
+            WatchService watchService = FileSystems.getDefault().newWatchService();
+            tempDir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE);
 
+            // Start segment monitoring in a separate thread
+            CompletableFuture.runAsync(() -> {
                 try {
-                    Files.list(tempDir)
-                            .filter(p -> p.getFileName().toString().endsWith(".ts"))
-                            .forEach(segmentPath -> {
-                                String segmentName = segmentPath.getFileName().toString();
-                                processSegment(streamId, segmentPath, segmentName, isFirstSegmentCreated, readySignal);
-                            });
+                    while (context.isActive()) {
+                        WatchKey key = watchService.poll(1, TimeUnit.SECONDS);
+                        if (key != null) {
+                            for (WatchEvent<?> event : key.pollEvents()) {
+                                if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE) {
+                                    Path newPath = tempDir.resolve((Path) event.context());
+                                    String segmentName = newPath.getFileName().toString();
+                                    if (segmentName.endsWith(".ts")) {
+                                        // Wait a bit to ensure the file is completely written
+                                        Thread.sleep(100);
+                                        processSegment(streamId, newPath, segmentName, isFirstSegmentCreated, readySignal);
+                                    }
+                                }
+                            }
+                            key.reset();
+                        }
+                    }
                 } catch (Exception e) {
-                    log.error("Error monitoring segments: {}", e.getMessage());
+                    log.error("Error in segment monitoring: {}", e.getMessage());
                 }
-            }, 0, 5, TimeUnit.SECONDS);
+            });
 
             ffmpegFuture.whenComplete((v, ex) -> {
                 if (ex != null) {
                     log.error("FFmpeg processing failed: {}", ex.getMessage());
                     stopStream(streamId);
                 }
-                segmentMonitor.shutdown();
+                try {
+                    watchService.close();
+                } catch (Exception e) {
+                    log.error("Error closing watch service: {}", e.getMessage());
+                }
             });
 
         } catch (Exception e) {
@@ -115,27 +131,31 @@ public class StreamService {
 
     private void processSegment(String streamId, Path segmentPath, String segmentName,
                                 AtomicBoolean isFirstSegmentCreated, CompletableFuture<Void> readySignal) {
-        try {
-            List<CompletableFuture<String>> uploads = new ArrayList<>();
-            List<StorageService> services = storageManager.getStoragesForStream(streamId);
+        Set<String> processed = processedSegments.get(streamId);
+        if (processed != null && !processed.contains(segmentName)) {
+            try {
+                List<CompletableFuture<String>> uploads = new ArrayList<>();
+                List<StorageService> services = storageManager.getStoragesForStream(streamId);
 
-            for (StorageService service : services) {
-                uploads.add(service.uploadSegment(segmentPath, streamId));
+                for (StorageService service : services) {
+                    uploads.add(service.uploadSegment(segmentPath, streamId));
+                }
+
+                CompletableFuture.allOf(uploads.toArray(new CompletableFuture[0]))
+                        .thenRun(() -> {
+                            processed.add(segmentName);
+                            m3u8Service.addSegment(streamId, segmentName);
+                            if (isFirstSegmentCreated.compareAndSet(false, true)) {
+                                readySignal.complete(null);
+                            }
+                        })
+                        .exceptionally(e -> {
+                            log.error("Error processing segment: {}", e.getMessage());
+                            return null;
+                        });
+            } catch (Exception e) {
+                log.error("Error processing segment: {}", e.getMessage());
             }
-
-            CompletableFuture.allOf(uploads.toArray(new CompletableFuture[0]))
-                    .thenRun(() -> {
-                        m3u8Service.addSegment(streamId, segmentName);
-                        if (isFirstSegmentCreated.compareAndSet(false, true)) {
-                            readySignal.complete(null);
-                        }
-                    })
-                    .exceptionally(e -> {
-                        log.error("Error processing segment: {}", e.getMessage());
-                        return null;
-                    });
-        } catch (Exception e) {
-            log.error("Error processing segment: {}", e.getMessage());
         }
     }
 
@@ -147,6 +167,7 @@ public class StreamService {
             m3u8Service.clearStreamCache(streamId);
             cleanupStreamDirectory(streamId);
             storageManager.removeStreamStorages(streamId);
+            processedSegments.remove(streamId);
         }
     }
 

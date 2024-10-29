@@ -51,6 +51,6 @@ public class LocalStorageService implements StorageService {
 
     @Override
     public String getSegmentUrl(String streamId, String segmentName) {
-        return String.format("%s/streams/%s/%s", config.getServerUrl(), streamId, segmentName);
+        return String.format("%s/streams/streams/%s/%s", config.getServerUrl(), streamId, segmentName);
     }
 }

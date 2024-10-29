@@ -40,7 +40,7 @@ public class FFmpegService {
                 command.add("-f");
                 command.add("segment");
                 command.add("-segment_time");
-                command.add("5");
+                command.add("10");
                 command.add("-segment_format");
                 command.add("mpegts");
                 command.add("-segment_list_size");
