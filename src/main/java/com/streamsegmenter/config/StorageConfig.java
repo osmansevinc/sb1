@@ -23,7 +23,7 @@ public class StorageConfig {
 
     public String getEffectiveTempPath() {
         if (System.getProperty("os.name").toLowerCase().contains("win")) {
-            return "C:\\temp\\streams";
+            return "C:\\temp";
         }
         return localTempPath;
     }

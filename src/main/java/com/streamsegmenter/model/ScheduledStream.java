@@ -12,4 +12,5 @@ public class ScheduledStream {
     private VideoQuality videoQuality;
     private LocalDateTime startTime;
     private boolean processed;
+    private String processingInstance;
 }

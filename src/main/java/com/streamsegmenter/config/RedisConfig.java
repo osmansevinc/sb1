@@ -10,26 +10,20 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 @Configuration
 public class RedisConfig {
-
     @Bean
     public RedisTemplate<String, ScheduledStream> redisTemplate(RedisConnectionFactory connectionFactory) {
         RedisTemplate<String, ScheduledStream> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
 
-        // Use Jackson serializer for ScheduledStream objects
         Jackson2JsonRedisSerializer<ScheduledStream> serializer =
                 new Jackson2JsonRedisSerializer<>(ScheduledStream.class);
 
-        // Use String serializer for keys
         template.setKeySerializer(new StringRedisSerializer());
         template.setHashKeySerializer(new StringRedisSerializer());
-
-        // Use Jackson serializer for values
         template.setValueSerializer(serializer);
         template.setHashValueSerializer(serializer);
 
         template.afterPropertiesSet();
-
         return template;
     }
 }

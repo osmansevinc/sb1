@@ -18,6 +18,8 @@ import java.util.HashSet;
 import java.time.LocalDateTime;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -30,6 +32,7 @@ public class StreamService {
     private final ConcurrentHashMap<String, StreamContext> activeStreams = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final ConcurrentHashMap<String, Set<String>> processedSegments = new ConcurrentHashMap<>();
+    private static final int SEGMENT_PROCESSING_DELAY_MS = 1000;
 
     public CompletableFuture<List<String>> startStream(String streamUrl, List<String> storageTypes,
                                                        VideoQuality quality, LocalDateTime startTime) {
@@ -42,13 +45,7 @@ public class StreamService {
         CompletableFuture<List<String>> resultFuture = new CompletableFuture<>();
         CompletableFuture<Void> readySignal = new CompletableFuture<>();
 
-        if (startTime != null && startTime.isAfter(LocalDateTime.now())) {
-            long delay = Duration.between(LocalDateTime.now(), startTime).toMillis();
-            scheduler.schedule(() -> processStream(streamId, streamUrl, readySignal, quality),
-                    delay, TimeUnit.MILLISECONDS);
-        } else {
-            processStream(streamId, streamUrl, readySignal, quality);
-        }
+        processStream(streamId, streamUrl, readySignal, quality);
 
         readySignal.orTimeout(30, TimeUnit.SECONDS)
                 .thenApply(v -> m3u8Service.getM3u8Urls(streamId))
@@ -79,11 +76,10 @@ public class StreamService {
             CompletableFuture<Void> ffmpegFuture = ffmpegService.startStreamProcessing(
                     streamId, streamUrl, segmentPattern, quality);
 
-            // Create WatchService for directory monitoring
             WatchService watchService = FileSystems.getDefault().newWatchService();
             tempDir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE);
 
-            // Start segment monitoring in a separate thread
+            //burda bir geriden gitmeliyiz
             CompletableFuture.runAsync(() -> {
                 try {
                     while (context.isActive()) {
@@ -93,9 +89,11 @@ public class StreamService {
                                 if (event.kind() == StandardWatchEventKinds.ENTRY_CREATE) {
                                     Path newPath = tempDir.resolve((Path) event.context());
                                     String segmentName = newPath.getFileName().toString();
+                                    while(!Files.exists(tempDir.resolve(getNextSegment(segmentName) ))) {
+                                        Thread.sleep(SEGMENT_PROCESSING_DELAY_MS);
+                                    }
                                     if (segmentName.endsWith(".ts")) {
-                                        // Wait a bit to ensure the file is completely written
-                                        Thread.sleep(100);
+                                        // Wait for the file to be completely written
                                         processSegment(streamId, newPath, segmentName, isFirstSegmentCreated, readySignal);
                                     }
                                 }
@@ -129,11 +127,28 @@ public class StreamService {
         }
     }
 
+    private String getNextSegment (String path) {
+        Pattern pattern = Pattern.compile("segment_(\\d+)\\.ts");
+        Matcher matcher = pattern.matcher(path);
+
+        if (matcher.find()) {
+            int segmentNumber = Integer.parseInt(matcher.group(1)) + 4;
+            String newSegment = "segment_" + segmentNumber + ".ts";
+            return matcher.replaceFirst(newSegment);
+        }
+        return null;
+    }
+
     private void processSegment(String streamId, Path segmentPath, String segmentName,
                                 AtomicBoolean isFirstSegmentCreated, CompletableFuture<Void> readySignal) {
         Set<String> processed = processedSegments.get(streamId);
         if (processed != null && !processed.contains(segmentName)) {
             try {
+                if (!Files.exists(segmentPath) || Files.size(segmentPath) == 0) {
+                    log.warn("Skipping empty or non-existent segment: {}", segmentPath);
+                    return;
+                }
+
                 List<CompletableFuture<String>> uploads = new ArrayList<>();
                 List<StorageService> services = storageManager.getStoragesForStream(streamId);
 
@@ -148,13 +163,14 @@ public class StreamService {
                             if (isFirstSegmentCreated.compareAndSet(false, true)) {
                                 readySignal.complete(null);
                             }
+                            log.info("Successfully processed segment: {}", segmentName);
                         })
                         .exceptionally(e -> {
-                            log.error("Error processing segment: {}", e.getMessage());
+                            log.error("Error processing segment: {} - {}", segmentName, e.getMessage());
                             return null;
                         });
             } catch (Exception e) {
-                log.error("Error processing segment: {}", e.getMessage());
+                log.error("Error processing segment: {} - {}", segmentName, e.getMessage());
             }
         }
     }
@@ -165,6 +181,19 @@ public class StreamService {
             context.setActive(false);
             ffmpegService.stopProcess(streamId);
             m3u8Service.clearStreamCache(streamId);
+
+            // Clean up S3 first
+            List<StorageService> services = storageManager.getStoragesForStream(streamId);
+            for (StorageService service : services) {
+                try {
+                    service.deleteStream(streamId);
+                } catch (Exception e) {
+                    log.error("Error cleaning up storage for service {}: {}",
+                            service.getClass().getSimpleName(), e.getMessage());
+                }
+            }
+
+            // Then clean up local files
             cleanupStreamDirectory(streamId);
             storageManager.removeStreamStorages(streamId);
             processedSegments.remove(streamId);

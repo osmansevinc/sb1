@@ -16,7 +16,7 @@ public class M3u8Service {
     private final Map<String, TreeSet<Integer>> streamSequences = new ConcurrentHashMap<>();
     private final Map<String, Map<String, String>> playlistContents = new ConcurrentHashMap<>();
 
-    private static final int SEGMENT_DURATION = 10;
+    private static final int SEGMENT_DURATION = 5;
     private static final int MAX_SEGMENTS = 6; // 30 seconds of content
 
     @Cacheable(value = "m3u8Urls", key = "#streamId", unless = "#result == null")
