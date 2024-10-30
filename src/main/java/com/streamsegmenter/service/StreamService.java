@@ -3,12 +3,16 @@ package com.streamsegmenter.service;
 import com.streamsegmenter.config.StorageConfig;
 import com.streamsegmenter.model.StreamContext;
 import com.streamsegmenter.model.VideoQuality;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.scheduling.annotation.Async;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.file.*;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.List;
 import java.util.UUID;
@@ -25,41 +29,56 @@ import java.util.regex.Pattern;
 @Service
 @RequiredArgsConstructor
 public class StreamService {
+    private static final Logger performanceLogger =
+            LoggerFactory.getLogger("com.streamsegmenter.performance");
+
     private final StorageConfig config;
     private final StorageManager storageManager;
     private final M3u8Service m3u8Service;
     private final FFmpegService ffmpegService;
-    private final ConcurrentHashMap<String, StreamContext> activeStreams = new ConcurrentHashMap<>();
+    public final ConcurrentHashMap<String, StreamContext> activeStreams = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     private final ConcurrentHashMap<String, Set<String>> processedSegments = new ConcurrentHashMap<>();
     private static final int SEGMENT_PROCESSING_DELAY_MS = 1000;
 
     public CompletableFuture<List<String>> startStream(String streamUrl, List<String> storageTypes,
                                                        VideoQuality quality, LocalDateTime startTime) {
+        long startTimeP = System.currentTimeMillis();
         String streamId = UUID.randomUUID().toString();
-        StreamContext context = new StreamContext(streamUrl);
-        activeStreams.put(streamId, context);
-        processedSegments.put(streamId, ConcurrentHashMap.newKeySet());
 
-        storageManager.registerStreamStorages(streamId, storageTypes);
-        CompletableFuture<List<String>> resultFuture = new CompletableFuture<>();
-        CompletableFuture<Void> readySignal = new CompletableFuture<>();
+        try {
+            StreamContext context = new StreamContext(streamUrl);
+            activeStreams.put(streamId, context);
+            processedSegments.put(streamId, ConcurrentHashMap.newKeySet());
 
-        processStream(streamId, streamUrl, readySignal, quality);
+            storageManager.registerStreamStorages(streamId, storageTypes);
+            CompletableFuture<List<String>> resultFuture = new CompletableFuture<>();
+            CompletableFuture<Void> readySignal = new CompletableFuture<>();
 
-        readySignal.orTimeout(30, TimeUnit.SECONDS)
-                .thenApply(v -> m3u8Service.getM3u8Urls(streamId))
-                .whenComplete((urls, ex) -> {
-                    if (ex != null) {
-                        stopStream(streamId);
-                        resultFuture.completeExceptionally(
-                                new RuntimeException("Failed to start stream within timeout", ex));
-                    } else {
-                        resultFuture.complete(urls);
-                    }
-                });
+            processStream(streamId, streamUrl, readySignal, quality);
 
-        return resultFuture;
+            readySignal.orTimeout(30, TimeUnit.SECONDS)
+                    .thenApply(v -> m3u8Service.getM3u8Urls(streamId))
+                    .whenComplete((urls, ex) -> {
+                        if (ex != null) {
+                            stopStream(streamId);
+                            resultFuture.completeExceptionally(
+                                    new RuntimeException("Failed to start stream within timeout", ex));
+                        } else {
+                            resultFuture.complete(urls);
+                        }
+
+                        long duration = System.currentTimeMillis() - startTimeP;
+                        performanceLogger.info("Stream start process completed in {} ms for streamId: {}",
+                                duration, streamId);
+                    });
+
+            return resultFuture;
+        } catch (Exception e) {
+            long duration = System.currentTimeMillis() - startTimeP;
+            performanceLogger.error("Stream start failed in {} ms for streamId: {}", duration, streamId);
+            throw e;
+        }
     }
 
     @Async

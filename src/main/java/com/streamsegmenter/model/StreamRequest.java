@@ -9,7 +9,7 @@ import java.util.List;
 
 @Data
 public class StreamRequest {
-    private static final DateTimeFormatter DATE_FORMATTER =
+    public static final DateTimeFormatter DATE_FORMATTER =
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
 
     @NotBlank(message = "Stream URL is required")
