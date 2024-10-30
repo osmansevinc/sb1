@@ -51,29 +51,26 @@ public class StreamSchedulerService {
                             stream.getProcessingInstance() == null &&
                             stream.getStartTime().isBefore(now)) {
 
-                        // Try to claim this stream for processing
-                        stream.setProcessingInstance(instanceId);
-                        Boolean claimed = redisTemplate.opsForHash()
-                                .putIfAbsent(SCHEDULED_STREAMS_KEY, id, stream);
 
-                        if (Boolean.TRUE.equals(claimed)) {
-                            try {
-                                streamService.startStream(
-                                        stream.getStreamUrl(),
-                                        stream.getStorageTypes(),
-                                        stream.getVideoQuality(),
-                                        null
-                                );
-                                stream.setProcessed(true);
-                                redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY, id, stream);
-                            } catch (Exception e) {
-                                log.error("Failed to start scheduled stream {}: {}", id, e.getMessage());
-                                // Release the claim if processing failed
-                                stream.setProcessingInstance(null);
-                                redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY, id, stream);
-                            }
+                        stream.setProcessingInstance(instanceId);
+                        redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY, id, stream);
+                        try {
+                            streamService.startStream(
+                                    stream.getStreamUrl(),
+                                    stream.getStorageTypes(),
+                                    stream.getVideoQuality(),
+                                    null
+                            );
+                            stream.setProcessed(true);
+                            redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY, id, stream);
+                        } catch (Exception e) {
+                            log.error("Failed to start scheduled stream {}: {}", id, e.getMessage());
+                            // Release the claim if processing failed
+                            stream.setProcessingInstance(null);
+                            redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY, id, stream);
                         }
                     }
+
                 });
     }
 

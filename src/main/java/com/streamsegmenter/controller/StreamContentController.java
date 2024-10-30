@@ -17,7 +17,6 @@ public class StreamContentController {
             @PathVariable String storageType) {
         return ResponseEntity.ok()
                 .header("Content-Type", "application/vnd.apple.mpegurl")
-                .header("Access-Control-Allow-Origin", "*")
                 .body(m3u8Service.getPlaylistContent(streamId, storageType));
     }
 }

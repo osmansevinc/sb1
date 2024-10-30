@@ -44,6 +44,16 @@ public class LocalStorageService implements StorageService {
                             log.error("Error deleting file: {}", e.getMessage());
                         }
                     });
+            Path dir = config.resolvePath( streamId);
+            Files.walk(dir)
+                    .sorted((a, b) -> -a.compareTo(b))
+                    .forEach(path -> {
+                        try {
+                            Files.delete(path);
+                        } catch (Exception e) {
+                            log.error("Error deleting file: {}", e.getMessage());
+                        }
+                    });
         } catch (Exception e) {
             log.error("Error deleting stream: {}", e.getMessage());
         }
