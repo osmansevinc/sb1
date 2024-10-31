@@ -52,8 +52,24 @@ public class AzureStorageService implements StorageService {
     }
 
     @Override
+    public void deleteSegment(String streamId, String segmentName) {
+        try {
+            String blobName = String.format("%s/%s", streamId, segmentName);
+            containerClient.getBlobClient(blobName).delete();
+            log.info("Deleted segment from Azure: {}", blobName);
+        } catch (Exception e) {
+            log.error("Error deleting segment from Azure: {}", e.getMessage());
+        }
+    }
+
+    @Override
     public String getSegmentUrl(String streamId, String segmentName) {
         return containerClient.getBlobClient(String.format("%s/%s", streamId, segmentName))
             .getBlobUrl();
+    }
+
+    @Override
+    public String getAdvertisementUrl(String streamId, String segmentName) {
+        return null;
     }
 }

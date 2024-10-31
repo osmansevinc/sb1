@@ -43,9 +43,11 @@ public class StreamService {
     private static final int SEGMENT_PROCESSING_DELAY_MS = 1000;
 
     public CompletableFuture<List<String>> startStream(String streamUrl, List<String> storageTypes,
-                                                       VideoQuality quality, LocalDateTime startTime, StreamRequest.Watermark watermark) {
+                                                       VideoQuality quality, LocalDateTime startTime,
+                                                       StreamRequest.Watermark watermark,
+                                                       String providedStreamId) {
         long startTimeP = System.currentTimeMillis();
-        String streamId = UUID.randomUUID().toString();
+        String streamId = providedStreamId != null ? providedStreamId : UUID.randomUUID().toString();
 
         try {
             StreamContext context = new StreamContext(streamUrl);
@@ -202,7 +204,7 @@ public class StreamService {
             ffmpegService.stopProcess(streamId);
             m3u8Service.clearStreamCache(streamId);
 
-            // Clean up S3 first
+            // Clean up storages
             List<StorageService> services = storageManager.getStoragesForStream(streamId);
             for (StorageService service : services) {
                 try {
@@ -213,8 +215,9 @@ public class StreamService {
                 }
             }
 
-            // Then clean up local files
+            // Clean up local files
             cleanupStreamDirectory(streamId);
+            cleanupAdvertisementDirectory(streamId); // Advertisement klasörünü temizle
             storageManager.removeStreamStorages(streamId);
             processedSegments.remove(streamId);
         }
@@ -236,6 +239,25 @@ public class StreamService {
             }
         } catch (Exception e) {
             log.error("Error cleaning up stream directory: {}", e.getMessage());
+        }
+    }
+
+    private void cleanupAdvertisementDirectory(String streamId) {
+        try {
+            Path adDir = config.resolvePath("advertisements", streamId);
+            if (Files.exists(adDir)) {
+                Files.walk(adDir)
+                        .sorted((a, b) -> -a.compareTo(b))
+                        .forEach(path -> {
+                            try {
+                                Files.delete(path);
+                            } catch (Exception e) {
+                                log.warn("Failed to delete advertisement path: {}", path);
+                            }
+                        });
+            }
+        } catch (Exception e) {
+            log.error("Error cleaning up advertisement directory: {}", e.getMessage());
         }
     }
 }

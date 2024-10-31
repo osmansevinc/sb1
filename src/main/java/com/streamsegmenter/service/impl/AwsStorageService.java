@@ -120,8 +120,29 @@ public class AwsStorageService implements StorageService {
     }
 
     @Override
+    public void deleteSegment(String streamId, String segmentName) {
+        try {
+            String key = String.format("%s/%s", streamId, segmentName);
+            DeleteObjectRequest deleteRequest = DeleteObjectRequest.builder()
+                    .bucket(bucket)
+                    .key(key)
+                    .build();
+
+            s3Client.deleteObject(deleteRequest);
+            log.info("Deleted segment from S3: {}", key);
+        } catch (Exception e) {
+            log.error("Error deleting segment from S3: {}", e.getMessage());
+        }
+    }
+
+    @Override
     public String getSegmentUrl(String streamId, String segmentName) {
         return String.format("https://%s.s3.amazonaws.com/%s/%s",
                 bucket, streamId, segmentName);
+    }
+
+    @Override
+    public String getAdvertisementUrl(String streamId, String segmentName) {
+        return null;
     }
 }

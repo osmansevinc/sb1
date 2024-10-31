@@ -126,9 +126,12 @@ public class M3u8Service {
                     // Reklam segmenti varsa ekle
                     String adPath = advertisements.get(sequence);
                     if (adPath != null && Files.exists(Path.of(adPath))) {
-                        playlist.append("#EXTINF:").append(SEGMENT_DURATION).append(".0,\n");
-                        playlist.append(service.getSegmentUrl(streamId,
-                                "advertisement_" + sequence + ".ts")).append("\n");
+                        String adSegmentName = "advertisement_" + sequence + ".ts";
+                        Path adSegmentPath = Path.of(adPath, adSegmentName);
+                        if (Files.exists(adSegmentPath)) {
+                            playlist.append("#EXTINF:").append(SEGMENT_DURATION).append(".0,\n");
+                            playlist.append(service.getAdvertisementUrl(streamId, adSegmentName)).append("\n");
+                        }
                     }
 
                     // Normal segmenti ekle

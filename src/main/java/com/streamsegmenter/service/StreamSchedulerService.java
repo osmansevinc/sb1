@@ -122,11 +122,14 @@ public class StreamSchedulerService {
                         redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY, id, stream);
 
                         try {
+                            // Stream ID'sini scheduled stream ID'si olarak kullan
                             streamService.startStream(
                                     stream.getStreamUrl(),
                                     stream.getStorageTypes(),
                                     stream.getVideoQuality(),
-                                    null, null
+                                    null,
+                                    stream.getWatermark(),
+                                    stream.getId() // Stream ID'yi geçir
                             );
                             stream.setProcessed(true);
                             redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY, id, stream);

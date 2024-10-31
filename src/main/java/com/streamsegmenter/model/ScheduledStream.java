@@ -13,4 +13,5 @@ public class ScheduledStream {
     private LocalDateTime startTime;
     private boolean processed;
     private String processingInstance;
+    private StreamRequest.Watermark watermark;
 }

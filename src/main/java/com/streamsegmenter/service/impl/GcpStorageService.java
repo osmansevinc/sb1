@@ -68,6 +68,18 @@ public class GcpStorageService implements StorageService {
                 bucketName, responseHeader);
     }
 
+    @Override
+    public void deleteSegment(String streamId, String segmentName) {
+        try {
+            String objectName = String.format("%s/%s", streamId, segmentName);
+            BlobId blobId = BlobId.of(bucketName, objectName);
+            storage.delete(blobId);
+            log.info("Deleted segment from GCP: {}", objectName);
+        } catch (Exception e) {
+            log.error("Error deleting segment from GCP: {}", e.getMessage());
+        }
+    }
+
 
     @Override
     public CompletableFuture<String> uploadSegment(Path segmentPath, String streamId) {
@@ -101,5 +113,10 @@ public class GcpStorageService implements StorageService {
     public String getSegmentUrl(String streamId, String segmentName) {
         return String.format("https://storage.googleapis.com/%s/%s/%s",
             bucketName, streamId, segmentName);
+    }
+
+    @Override
+    public String getAdvertisementUrl(String streamId, String segmentName) {
+        return null;
     }
 }

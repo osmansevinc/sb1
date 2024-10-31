@@ -63,4 +63,20 @@ public class LocalStorageService implements StorageService {
     public String getSegmentUrl(String streamId, String segmentName) {
         return String.format("%s/streams/streams/%s/%s", config.getServerUrl(), streamId, segmentName);
     }
+
+    @Override
+    public String getAdvertisementUrl(String streamId, String segmentName) {
+        return String.format("%s/streams/advertisements/%s/%s", config.getServerUrl(), streamId, segmentName);
+    }
+
+    @Override
+    public void deleteSegment(String streamId, String segmentName) {
+        try {
+            Path segmentPath = config.resolvePath(streamId, segmentName);
+            Files.deleteIfExists(segmentPath);
+            log.info("Deleted local segment: {}", segmentPath);
+        } catch (Exception e) {
+            log.error("Error deleting local segment: {}", e.getMessage());
+        }
+    }
 }

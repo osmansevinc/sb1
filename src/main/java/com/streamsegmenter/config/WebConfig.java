@@ -22,7 +22,7 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        registry.addResourceHandler("/streams/**")
+        registry.addResourceHandler("/streams/**","/advertisements/**")
             .addResourceLocations("file:" + storageConfig.getEffectiveTempPath() + "/")
             .setCachePeriod(0);
     }
