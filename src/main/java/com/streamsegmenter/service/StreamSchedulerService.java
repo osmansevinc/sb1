@@ -1,6 +1,7 @@
 package com.streamsegmenter.service;
 
 import com.streamsegmenter.model.ScheduledStream;
+import com.streamsegmenter.model.StreamRequest;
 import com.streamsegmenter.model.StreamUpdateRequest;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -58,6 +59,13 @@ public class StreamSchedulerService {
         }
         stream.setProcessed(false);
         stream.setProcessingInstance(null);
+
+        // Watermark bilgisini sakla
+        if (stream.getWatermark() != null) {
+            redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY + ":watermark",
+                    stream.getId(), stream.getWatermark());
+        }
+
         redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY, stream.getId(), stream);
         log.info("Stream scheduled: {}", stream.getId());
     }
@@ -65,7 +73,13 @@ public class StreamSchedulerService {
     public List<ScheduledStream> getAllScheduledStreams() {
         List<ScheduledStream> streams = new ArrayList<>();
         Map<Object, Object> entries = redisTemplate.opsForHash().entries(SCHEDULED_STREAMS_KEY);
-        entries.values().forEach(obj -> streams.add((ScheduledStream) obj));
+        entries.values().forEach(obj -> {
+            ScheduledStream scheduledStream = (ScheduledStream) obj;
+            StreamRequest.Watermark watermark = (StreamRequest.Watermark)
+                    redisTemplate.opsForHash().get(SCHEDULED_STREAMS_KEY + ":watermark", scheduledStream.getId());
+            scheduledStream.setWatermark(watermark);
+            streams.add(scheduledStream);
+        });
         return streams;
     }
 
@@ -122,14 +136,18 @@ public class StreamSchedulerService {
                         redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY, id, stream);
 
                         try {
-                            // Stream ID'sini scheduled stream ID'si olarak kullan
+                            // Watermark bilgisini al
+                            StreamRequest.Watermark watermark = (StreamRequest.Watermark)
+                                    redisTemplate.opsForHash().get(SCHEDULED_STREAMS_KEY + ":watermark",
+                                            stream.getId());
+
                             streamService.startStream(
                                     stream.getStreamUrl(),
                                     stream.getStorageTypes(),
                                     stream.getVideoQuality(),
                                     null,
-                                    stream.getWatermark(),
-                                    stream.getId() // Stream ID'yi geçir
+                                    watermark,
+                                    stream.getId()
                             );
                             stream.setProcessed(true);
                             redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY, id, stream);
@@ -145,6 +163,7 @@ public class StreamSchedulerService {
 
     public void removeScheduledStream(String streamId) {
         redisTemplate.opsForHash().delete(SCHEDULED_STREAMS_KEY, streamId);
+        redisTemplate.opsForHash().delete(SCHEDULED_STREAMS_KEY + ":watermark", streamId);
         log.info("Stream removed from scheduler: {}", streamId);
     }
 }

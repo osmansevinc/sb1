@@ -1,5 +1,6 @@
 package com.streamsegmenter.service;
 
+import com.streamsegmenter.model.AdvertisementInfo;
 import org.springframework.stereotype.Service;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.CacheEvict;
@@ -22,7 +23,7 @@ public class M3u8Service {
     private final StorageManager storageManager;
     private final Map<String, TreeSet<Integer>> streamSequences = new ConcurrentHashMap<>();
     private final Map<String, Map<String, String>> playlistContents = new ConcurrentHashMap<>();
-    private final Map<String, Map<Integer, String>> advertisementSegments = new ConcurrentHashMap<>();
+    private final Map<String, Map<Integer, AdvertisementInfo>> advertisementSegments = new ConcurrentHashMap<>();
 
     private static final int SEGMENT_DURATION = 5;
     private static final int MAX_SEGMENTS = 6;
@@ -50,9 +51,9 @@ public class M3u8Service {
         }
     }
 
-    public void registerAdvertisement(String streamId, int segmentNumber, String segmentPath) {
+    public void registerAdvertisement(String streamId, int segmentNumber, String segmentPath, int duration) {
         advertisementSegments.computeIfAbsent(streamId, k -> new ConcurrentHashMap<>())
-                .put(segmentNumber, segmentPath);
+                .put(segmentNumber, new AdvertisementInfo(segmentPath, duration));
         updatePlaylist(streamId);
     }
 
@@ -112,7 +113,7 @@ public class M3u8Service {
             List<StorageService> services = storageManager.getStoragesForStream(streamId);
             Map<String, String> playlists = playlistContents.computeIfAbsent(streamId,
                     k -> new ConcurrentHashMap<>());
-            Map<Integer, String> advertisements = advertisementSegments.getOrDefault(streamId,
+            Map<Integer, AdvertisementInfo> advertisements = advertisementSegments.getOrDefault(streamId,
                     new ConcurrentHashMap<>());
 
             for (StorageService service : services) {
@@ -124,12 +125,12 @@ public class M3u8Service {
 
                 for (Integer sequence : sequences) {
                     // Reklam segmenti varsa ekle
-                    String adPath = advertisements.get(sequence);
-                    if (adPath != null && Files.exists(Path.of(adPath))) {
+                    AdvertisementInfo adInfo = advertisements.get(sequence);
+                    if (adInfo != null && Files.exists(Path.of(adInfo.getPath()))) {
                         String adSegmentName = "advertisement_" + sequence + ".ts";
-                        Path adSegmentPath = Path.of(adPath, adSegmentName);
+                        Path adSegmentPath = Path.of(adInfo.getPath(), adSegmentName);
                         if (Files.exists(adSegmentPath)) {
-                            playlist.append("#EXTINF:").append(SEGMENT_DURATION).append(".0,\n");
+                            playlist.append("#EXTINF:").append(adInfo.getDuration()).append(".0,\n");
                             playlist.append(service.getAdvertisementUrl(streamId, adSegmentName)).append("\n");
                         }
                     }

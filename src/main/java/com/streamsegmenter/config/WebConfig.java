@@ -15,15 +15,19 @@ public class WebConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
                 .allowedOrigins("*")
-            .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-            .allowedHeaders("*")
-            .maxAge(3600);
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                .allowedHeaders("*")
+                .maxAge(3600);
     }
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        registry.addResourceHandler("/streams/**","/advertisements/**")
-            .addResourceLocations("file:" + storageConfig.getEffectiveTempPath() + "/")
-            .setCachePeriod(0);
+        // Stream segments için mapping
+        registry.addResourceHandler("/streams/**")
+                .addResourceLocations("file:" + storageConfig.getEffectiveTempPath() + "/streams/");
+
+        // Advertisement segments için ayrı mapping
+        registry.addResourceHandler("/advertisements/**")
+                .addResourceLocations("file:" + storageConfig.getEffectiveTempPath() + "/advertisements/");
     }
 }

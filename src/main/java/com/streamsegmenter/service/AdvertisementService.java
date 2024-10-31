@@ -55,7 +55,7 @@ public class AdvertisementService {
                 try {
                     // Upload advertisement to all active storages
                     uploadAdvertisementToStorages(request.getStreamId(), outputDir, request.getStartSegment());
-                    registerAdvertisement(request.getStreamId(), request.getStartSegment(), outputDir.toString());
+                    registerAdvertisement(request.getStreamId(), request.getStartSegment(), outputDir.toString(),request.getDuration());
                     long duration = System.currentTimeMillis() - startTime;
                     log.info("Advertisement processing completed in {} ms", duration);
                 } catch (Exception e) {
@@ -134,8 +134,8 @@ public class AdvertisementService {
         });
     }
 
-    private void registerAdvertisement(String streamId, int segmentNumber, String path) {
-        m3u8Service.registerAdvertisement(streamId,segmentNumber,path);
+    private void registerAdvertisement(String streamId, int segmentNumber, String path, int duration) {
+        m3u8Service.registerAdvertisement(streamId,segmentNumber,path,duration);
         streamAdvertisements.computeIfAbsent(streamId, k -> new ConcurrentHashMap<>())
                 .put(segmentNumber, path);
         //m3u8Service.updatePlaylist(streamId);

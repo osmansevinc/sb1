@@ -143,6 +143,7 @@ public class AwsStorageService implements StorageService {
 
     @Override
     public String getAdvertisementUrl(String streamId, String segmentName) {
-        return null;
+        return String.format("https://%s.s3.amazonaws.com/%s/advertisements/%s",
+                bucket, streamId, segmentName);
     }
 }
