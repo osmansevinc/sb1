@@ -11,6 +11,7 @@ import java.util.List;
 public class NotificationConfig {
     private Email email = new Email();
     private Sms sms = new Sms();
+    private Telegram telegram = new Telegram();
     private List<String> notifyBeforeMinutes;
     private boolean enabled;
 
@@ -24,6 +25,14 @@ public class NotificationConfig {
         private String from;
         private List<String> to;
         private String subject;
+        private String template;
+    }
+
+    @Data
+    public static class Telegram {
+        private boolean enabled;
+        private String botToken;
+        private List<String> chatIds;
         private String template;
     }
 

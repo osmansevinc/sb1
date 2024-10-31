@@ -2,6 +2,7 @@ package com.streamsegmenter.service;
 
 import com.streamsegmenter.config.StorageConfig;
 import com.streamsegmenter.model.StreamContext;
+import com.streamsegmenter.model.StreamRequest;
 import com.streamsegmenter.model.VideoQuality;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,7 +43,7 @@ public class StreamService {
     private static final int SEGMENT_PROCESSING_DELAY_MS = 1000;
 
     public CompletableFuture<List<String>> startStream(String streamUrl, List<String> storageTypes,
-                                                       VideoQuality quality, LocalDateTime startTime) {
+                                                       VideoQuality quality, LocalDateTime startTime, StreamRequest.Watermark watermark) {
         long startTimeP = System.currentTimeMillis();
         String streamId = UUID.randomUUID().toString();
 
@@ -55,7 +56,7 @@ public class StreamService {
             CompletableFuture<List<String>> resultFuture = new CompletableFuture<>();
             CompletableFuture<Void> readySignal = new CompletableFuture<>();
 
-            processStream(streamId, streamUrl, readySignal, quality);
+            processStream(streamId, streamUrl, readySignal, quality, watermark);
 
             readySignal.orTimeout(30, TimeUnit.SECONDS)
                     .thenApply(v -> m3u8Service.getM3u8Urls(streamId))
@@ -83,7 +84,7 @@ public class StreamService {
 
     @Async
     protected void processStream(String streamId, String streamUrl, CompletableFuture<Void> readySignal,
-                                 VideoQuality quality) {
+                                 VideoQuality quality, StreamRequest.Watermark watermark) {
         StreamContext context = activeStreams.get(streamId);
         Path tempDir = config.resolvePath("streams", streamId);
         AtomicBoolean isFirstSegmentCreated = new AtomicBoolean(false);
@@ -93,7 +94,7 @@ public class StreamService {
             Path segmentPattern = tempDir.resolve("segment_%d.ts");
 
             CompletableFuture<Void> ffmpegFuture = ffmpegService.startStreamProcessing(
-                    streamId, streamUrl, segmentPattern, quality);
+                    streamId, streamUrl, segmentPattern, quality, watermark);
 
             WatchService watchService = FileSystems.getDefault().newWatchService();
             tempDir.register(watchService, StandardWatchEventKinds.ENTRY_CREATE);

@@ -39,7 +39,7 @@ notification:
     - "5"
     - "0"
   email:
-    enabled: true
+    enabled: false
     host: ${SMTP_HOST:smtp.gmail.com}
     port: ${SMTP_PORT:587}
     username: ${SMTP_USERNAME:}
@@ -57,6 +57,12 @@ notification:
       <p>Video Kalitesi: %s</p>
       </body>
       </html>
+  telegram:
+    enabled: ${TELEGRAM_ENABLED:false}
+    botToken: ${TELEGRAM_BOT_TOKEN:}
+    chatIds:
+      - ${TELEGRAM_CHAT_IDS:}
+    template: "Stream URL: %s\nBaşlamasına %d dakika kaldı\nKalite: %s"
   sms:
     enabled: false
     apiKey: ${SMS_API_KEY:}

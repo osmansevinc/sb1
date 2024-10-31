@@ -41,7 +41,8 @@ public class StreamController {
                     request.getStreamUrl(),
                     request.getStorageTypes(),
                     request.getVideoQuality(),
-                    null
+                    null,
+                    request.getWatermark()
             ).get(30, TimeUnit.SECONDS);
 
             return ResponseEntity.ok().body(urls);

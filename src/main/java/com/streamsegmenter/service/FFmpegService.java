@@ -1,5 +1,6 @@
 package com.streamsegmenter.service;
 
+import com.streamsegmenter.model.StreamRequest;
 import org.springframework.stereotype.Service;
 import com.streamsegmenter.model.VideoQuality;
 import java.nio.file.Path;
@@ -26,7 +27,8 @@ public class FFmpegService {
     }
 
     public CompletableFuture<Void> startStreamProcessing(String streamId, String streamUrl,
-                                                         Path outputPattern, VideoQuality quality) {
+                                                         Path outputPattern, VideoQuality quality,
+                                                         StreamRequest.Watermark watermark) {
         long startTime = System.currentTimeMillis();
         return CompletableFuture.runAsync(() -> {
             try {
@@ -34,14 +36,46 @@ public class FFmpegService {
                 command.add(ffmpegPath);
                 command.add("-i");
                 command.add(streamUrl);
+
+
+
+                // Watermark ekleme
+                if (watermark != null) {
+                    if (watermark.getImagePath() != null) {
+                        // Resim watermark
+                        command.add("-i");
+                        command.add(watermark.getImagePath());
+                        command.add("-filter_complex");
+                        command.add(String.format(
+                                "[1:v]scale=-1:%d,format=rgba,colorchannelmixer=aa=%f[watermark];" +
+                                        "[0:v][watermark]overlay=%d:%d",
+                                watermark.getSize(), watermark.getOpacity(),
+                                watermark.getX(), watermark.getY()
+                        ));
+                    } else if (watermark.getText() != null) {
+                        // Metin watermark
+                        command.add("-vf");
+                        command.add(String.format(
+                                "drawtext=text='%s':fontsize=%d:fontcolor=%s@%f:x=%d:y=%d",
+                                watermark.getText(), watermark.getSize(), watermark.getColor(),
+                                watermark.getOpacity(), watermark.getX(), watermark.getY()
+                        ));
+                    }
+                }
+
+                // Video kodlama ayarları
                 command.add("-c:v");
                 command.add("libx264");
                 command.add("-b:v");
                 command.add(quality.getVideoBitrateKbps() + "k");
+
+                // Ses kodlama ayarları
                 command.add("-c:a");
                 command.add("aac");
                 command.add("-b:a");
                 command.add(quality.getAudioBitrateKbps() + "k");
+
+                // Segmentleme ayarları
                 command.add("-f");
                 command.add("segment");
                 command.add("-segment_time");

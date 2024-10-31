@@ -126,7 +126,7 @@ public class StreamSchedulerService {
                                     stream.getStreamUrl(),
                                     stream.getStorageTypes(),
                                     stream.getVideoQuality(),
-                                    null
+                                    null, null
                             );
                             stream.setProcessed(true);
                             redisTemplate.opsForHash().put(SCHEDULED_STREAMS_KEY, id, stream);

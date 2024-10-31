@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -21,6 +22,8 @@ import java.util.Properties;
 public class NotificationService {
     private final NotificationConfig config;
     private final StreamSchedulerService schedulerService;
+    private final RestTemplate restTemplate = new RestTemplate();
+    private static final String TELEGRAM_API_URL = "https://api.telegram.org/bot%s/sendMessage";
 
     private JavaMailSender createMailSender() {
         JavaMailSenderImpl mailSender = new JavaMailSenderImpl();
@@ -62,6 +65,9 @@ public class NotificationService {
         if (config.getSms().isEnabled()) {
             sendSms(stream, minutesUntilStart);
         }
+        if (config.getTelegram().isEnabled()) {
+            sendTelegram(stream, minutesUntilStart);
+        }
     }
 
     private void sendEmail(ScheduledStream stream, long minutesUntilStart) {
@@ -87,10 +93,33 @@ public class NotificationService {
         }
     }
 
+    private void sendTelegram(ScheduledStream stream, long minutesUntilStart) {
+        try {
+            String message = String.format(config.getTelegram().getTemplate(),
+                    stream.getStreamUrl(),
+                    minutesUntilStart,
+                    stream.getVideoQuality());
+
+            String apiUrl = String.format(TELEGRAM_API_URL, config.getTelegram().getBotToken());
+
+            for (String chatId : config.getTelegram().getChatIds()) {
+                try {
+                    restTemplate.postForObject(apiUrl,
+                            new TelegramMessage(chatId, message),
+                            TelegramResponse.class);
+                    log.info("Telegram notification sent to chat {}", chatId);
+                } catch (Exception e) {
+                    log.error("Failed to send Telegram notification to chat {}: {}",
+                            chatId, e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to send Telegram notifications", e);
+        }
+    }
+
     private void sendSms(ScheduledStream stream, long minutesUntilStart) {
         try {
-            // SMS gönderimi için gerekli implementasyon
-            // Örnek: Twilio, Nexmo vb. servisler kullanılabilir
             String content = String.format(config.getSms().getTemplate(),
                     stream.getStreamUrl(),
                     minutesUntilStart,
@@ -101,4 +130,7 @@ public class NotificationService {
             log.error("Failed to send SMS notification", e);
         }
     }
+
+    private record TelegramMessage(String chat_id, String text) {}
+    private record TelegramResponse(boolean ok, String description) {}
 }

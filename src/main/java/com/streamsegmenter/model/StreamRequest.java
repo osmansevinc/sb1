@@ -17,10 +17,9 @@ public class StreamRequest {
     private String streamUrl;
 
     private List<String> storageTypes;
-
     private VideoQuality videoQuality = VideoQuality.LOW;
-
     private String startTimeStr;
+    private Watermark watermark;
 
     public LocalDateTime getStartTime() {
         return startTimeStr != null ? LocalDateTime.parse(startTimeStr, DATE_FORMATTER) : null;
@@ -28,5 +27,16 @@ public class StreamRequest {
 
     public void setStartTime(String startTimeStr) {
         this.startTimeStr = startTimeStr;
+    }
+
+    @Data
+    public static class Watermark {
+        private String text;
+        private String imagePath;
+        private int x = 10; // Default position
+        private int y = 10;
+        private int size = 24; // Default font size
+        private String color = "white"; // Default color
+        private float opacity = 0.8f; // Default opacity
     }
 }

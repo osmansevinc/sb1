@@ -9,6 +9,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.nio.file.Path;
+import java.nio.file.Files;
 
 @Slf4j
 @Service
@@ -20,6 +22,7 @@ public class M3u8Service {
     private final StorageManager storageManager;
     private final Map<String, TreeSet<Integer>> streamSequences = new ConcurrentHashMap<>();
     private final Map<String, Map<String, String>> playlistContents = new ConcurrentHashMap<>();
+    private final Map<String, Map<Integer, String>> advertisementSegments = new ConcurrentHashMap<>();
 
     private static final int SEGMENT_DURATION = 5;
     private static final int MAX_SEGMENTS = 6;
@@ -45,6 +48,12 @@ public class M3u8Service {
                     duration, streamId);
             throw e;
         }
+    }
+
+    public void registerAdvertisement(String streamId, int segmentNumber, String segmentPath) {
+        advertisementSegments.computeIfAbsent(streamId, k -> new ConcurrentHashMap<>())
+                .put(segmentNumber, segmentPath);
+        updatePlaylist(streamId);
     }
 
     public String getPlaylistContent(String streamId, String storageType) {
@@ -103,6 +112,8 @@ public class M3u8Service {
             List<StorageService> services = storageManager.getStoragesForStream(streamId);
             Map<String, String> playlists = playlistContents.computeIfAbsent(streamId,
                     k -> new ConcurrentHashMap<>());
+            Map<Integer, String> advertisements = advertisementSegments.getOrDefault(streamId,
+                    new ConcurrentHashMap<>());
 
             for (StorageService service : services) {
                 StringBuilder playlist = new StringBuilder();
@@ -112,6 +123,15 @@ public class M3u8Service {
                 playlist.append("#EXT-X-MEDIA-SEQUENCE:").append(mediaSequence).append("\n");
 
                 for (Integer sequence : sequences) {
+                    // Reklam segmenti varsa ekle
+                    String adPath = advertisements.get(sequence);
+                    if (adPath != null && Files.exists(Path.of(adPath))) {
+                        playlist.append("#EXTINF:").append(SEGMENT_DURATION).append(".0,\n");
+                        playlist.append(service.getSegmentUrl(streamId,
+                                "advertisement_" + sequence + ".ts")).append("\n");
+                    }
+
+                    // Normal segmenti ekle
                     String segmentName = String.format("segment_%d.ts", sequence);
                     playlist.append("#EXTINF:").append(SEGMENT_DURATION).append(".0,\n");
                     playlist.append(service.getSegmentUrl(streamId, segmentName)).append("\n");
@@ -136,6 +156,7 @@ public class M3u8Service {
         try {
             streamSequences.remove(streamId);
             playlistContents.remove(streamId);
+            advertisementSegments.remove(streamId);
 
             long duration = System.currentTimeMillis() - startTime;
             performanceLogger.info("Stream cache cleared in {} ms for streamId: {}", duration, streamId);
