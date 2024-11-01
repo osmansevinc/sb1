@@ -117,7 +117,7 @@ public class GcpStorageService implements StorageService {
 
     @Override
     public String getAdvertisementUrl(String streamId, String segmentName) {
-        return String.format("https://storage.googleapis.com/%s/%s/advertisements/%s",
+        return String.format("https://storage.googleapis.com/%s/%s/%s",
                 bucketName, streamId, segmentName);
     }
 }

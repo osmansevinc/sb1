@@ -15,8 +15,7 @@ import org.slf4j.LoggerFactory;
 @Slf4j
 @Service
 public class FFmpegService {
-    private static final Logger performanceLogger =
-            LoggerFactory.getLogger("com.streamsegmenter.performance");
+    private static final Logger performanceLogger = LoggerFactory.getLogger("com.streamsegmenter.performance");
     private final ConcurrentHashMap<String, Process> activeProcesses = new ConcurrentHashMap<>();
     private final String ffmpegPath;
 
@@ -36,8 +35,6 @@ public class FFmpegService {
                 command.add(ffmpegPath);
                 command.add("-i");
                 command.add(streamUrl);
-
-
 
                 // Watermark ekleme
                 if (watermark != null) {
@@ -98,16 +95,14 @@ public class FFmpegService {
 
                 int exitCode = process.waitFor();
                 long duration = System.currentTimeMillis() - startTime;
-                performanceLogger.info("FFmpeg process completed in {} ms for streamId: {}",
-                        duration, streamId);
+                performanceLogger.info("FFmpeg process completed in {} ms for streamId: {}", duration, streamId);
 
                 if (exitCode != 0) {
                     throw new RuntimeException("FFmpeg process failed with exit code: " + exitCode);
                 }
             } catch (Exception e) {
                 long duration = System.currentTimeMillis() - startTime;
-                performanceLogger.error("FFmpeg process failed in {} ms for streamId: {}",
-                        duration, streamId);
+                performanceLogger.error("FFmpeg process failed in {} ms for streamId: {}", duration, streamId);
                 log.error("Error in FFmpeg processing: {}", e.getMessage());
                 throw new RuntimeException("Failed to process stream", e);
             } finally {
@@ -157,7 +152,7 @@ public class FFmpegService {
         }
     }
 
-    public void convertVideoToSegments(Path videoPath, Path outputDir, int startSegment, int duration) {
+    public void convertVideoToSegments(Path videoPath, Path outputPath, int startSegment, int durationSeconds) {
         long startTime = System.currentTimeMillis();
         try {
             List<String> command = new ArrayList<>();
@@ -166,35 +161,33 @@ public class FFmpegService {
             command.add(videoPath.toString());
             command.add("-c");
             command.add("copy");
-            command.add("-f");
-            command.add("segment");
-            command.add("-segment_time");
-            command.add("5");
-            command.add("-segment_format");
-            command.add("mpegts");
-            command.add("-segment_start_number");
-            command.add(String.valueOf(startSegment));
-            if (duration > 0) {
-                command.add("-t");
-                command.add(String.valueOf(duration));
-            }
-            command.add(outputDir.resolve("segment_%d.ts").toString());
 
-            log.debug("Starting video segmentation with command: {}", String.join(" ", command));
+            // Duration parametresi
+            if (durationSeconds > 0) {
+                command.add("-t");
+                command.add(String.valueOf(durationSeconds));
+            }
+
+            // Output format ve dosya
+            command.add("-f");
+            command.add("mpegts");
+            command.add(outputPath.toString());
+
+            log.debug("Starting video conversion with command: {}", String.join(" ", command));
             Process process = new ProcessBuilder(command)
                     .inheritIO()
                     .start();
 
             int exitCode = process.waitFor();
-            long durationP = System.currentTimeMillis() - startTime;
+            long duration = System.currentTimeMillis() - startTime;
 
             if (exitCode == 0) {
-                performanceLogger.info("Video segmentation completed in {} ms", durationP);
+                performanceLogger.info("Video conversion completed in {} ms", duration);
             } else {
                 throw new RuntimeException("FFmpeg video segmentation failed with exit code: " + exitCode);
             }
         } catch (Exception e) {
-            long durationP = System.currentTimeMillis() - startTime;
+            long duration = System.currentTimeMillis() - startTime;
             performanceLogger.error("Video segmentation failed in {} ms: {}", duration, e.getMessage());
             throw new RuntimeException("Failed to convert video to segments", e);
         }

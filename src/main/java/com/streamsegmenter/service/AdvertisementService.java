@@ -2,6 +2,8 @@ package com.streamsegmenter.service;
 
 import com.streamsegmenter.config.StorageConfig;
 import com.streamsegmenter.model.AdvertisementRequest;
+import com.streamsegmenter.model.ScheduledStream;
+import com.streamsegmenter.model.StreamContext;
 import com.streamsegmenter.service.impl.LocalStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,12 +25,18 @@ public class AdvertisementService {
     private final StorageConfig config;
     private final FFmpegService ffmpegService;
     private final M3u8Service m3u8Service;
+    private final StreamService streamService;
     private final StorageManager storageManager;
+    private final StreamSchedulerService streamSchedulerService;
     private final ConcurrentHashMap<String, ConcurrentHashMap<Integer, String>> streamAdvertisements = new ConcurrentHashMap<>();
 
-    public void insertAdvertisement(AdvertisementRequest request) {
+    public String insertAdvertisement(AdvertisementRequest request) {
         long startTime = System.currentTimeMillis();
         try {
+            if(!(checkStreamActive(request.getStreamId()) || checkStreamScheduled(request.getStreamId()))) {
+                return "Advertisement didn't insert, because there is no scheduled or active stream with this id.";
+            }
+
             Path tempFile = Files.createTempFile("ad-", getExtension(request.getFile().getOriginalFilename()));
             request.getFile().transferTo(tempFile.toFile());
 
@@ -70,6 +78,20 @@ public class AdvertisementService {
             log.error("Failed to insert advertisement", e);
             throw new RuntimeException("Advertisement insertion failed", e);
         }
+        return "Advertisement inserted successfully";
+    }
+
+    private boolean checkStreamActive(String streamId) {
+        return streamService.activeStreams.get(streamId) != null;
+    }
+
+    private boolean checkStreamScheduled(String streamId) {
+        ScheduledStream stream = streamSchedulerService.getScheduledStreamsById(streamId);
+        if(stream != null){
+            storageManager.registerStreamStorages(streamId, stream.getStorageTypes());
+            return true;
+        }
+        return false;
     }
 
     private void uploadAdvertisementToStorages(String streamId, Path adDir, int segmentNumber) {
@@ -112,7 +134,8 @@ public class AdvertisementService {
                                                  AdvertisementRequest request) {
         return CompletableFuture.runAsync(() -> {
             try {
-                ffmpegService.convertVideoToSegments(videoPath, outputDir,
+                Path outputPath = outputDir.resolve("advertisement_" + request.getStartSegment() + ".ts");
+                ffmpegService.convertVideoToSegments(videoPath, outputPath,
                         request.getStartSegment(), request.getDuration());
             } catch (Exception e) {
                 log.error("Failed to process video advertisement", e);

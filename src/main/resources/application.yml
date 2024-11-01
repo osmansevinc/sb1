@@ -74,3 +74,8 @@ notification:
 
 server:
   port: 8080
+
+api:
+  auth:
+    username: ${API_ADMIN:admin}
+    password: ${API_PASSWORD:password}

@@ -70,7 +70,7 @@ public class AzureStorageService implements StorageService {
 
     @Override
     public String getAdvertisementUrl(String streamId, String segmentName) {
-        return containerClient.getBlobClient(String.format("%s/advertisements/%s", streamId, segmentName))
+        return containerClient.getBlobClient(String.format("%s/%s", streamId, segmentName))
                 .getBlobUrl();
     }
 }

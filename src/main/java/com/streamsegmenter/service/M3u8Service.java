@@ -17,9 +17,7 @@ import java.nio.file.Files;
 @Service
 @RequiredArgsConstructor
 public class M3u8Service {
-    private static final Logger performanceLogger =
-            LoggerFactory.getLogger("com.streamsegmenter.performance");
-
+    private static final Logger performanceLogger = LoggerFactory.getLogger("com.streamsegmenter.performance");
     private final StorageManager storageManager;
     private final Map<String, TreeSet<Integer>> streamSequences = new ConcurrentHashMap<>();
     private final Map<String, Map<String, String>> playlistContents = new ConcurrentHashMap<>();
@@ -45,24 +43,32 @@ public class M3u8Service {
             return urls;
         } catch (Exception e) {
             long duration = System.currentTimeMillis() - startTime;
-            performanceLogger.error("Failed to get M3u8 URLs in {} ms for streamId: {}",
-                    duration, streamId);
+            performanceLogger.error("Failed to get M3u8 URLs in {} ms for streamId: {}", duration, streamId);
             throw e;
         }
     }
 
     public void registerAdvertisement(String streamId, int segmentNumber, String segmentPath, int duration) {
+        String adSegmentName = "advertisement_" + segmentNumber + ".ts";
         advertisementSegments.computeIfAbsent(streamId, k -> new ConcurrentHashMap<>())
-                .put(segmentNumber, new AdvertisementInfo(segmentPath, duration));
+                .put(segmentNumber, new AdvertisementInfo(segmentPath, duration, adSegmentName, false));
         updatePlaylist(streamId);
+        log.info("Registered advertisement for stream {} at segment {}, duration: {}s",
+                streamId, segmentNumber, duration);
     }
 
     public String getPlaylistContent(String streamId, String storageType) {
         long startTime = System.currentTimeMillis();
         try {
-            String content = playlistContents
-                    .computeIfAbsent(streamId, k -> new ConcurrentHashMap<>())
-                    .getOrDefault(storageType, generateEmptyPlaylist(0));
+            Map<String, String> streamPlaylists = playlistContents.get(streamId);
+            if (streamPlaylists == null) {
+                return generateEmptyPlaylist(0);
+            }
+
+            String content = streamPlaylists.get(storageType.toLowerCase());
+            if (content == null) {
+                return generateEmptyPlaylist(0);
+            }
 
             long duration = System.currentTimeMillis() - startTime;
             performanceLogger.info("Playlist content retrieved in {} ms for streamId: {}, storageType: {}",
@@ -75,6 +81,7 @@ public class M3u8Service {
             throw e;
         }
     }
+
 
     @CacheEvict(value = "segments", key = "#streamId")
     public synchronized void addSegment(String streamId, String segmentName) {
@@ -101,75 +108,59 @@ public class M3u8Service {
         }
     }
 
-    public void updatePlaylist(String streamId) {
-        long startTime = System.currentTimeMillis();
-        try {
-            TreeSet<Integer> sequences = streamSequences.get(streamId);
-            if (sequences == null || sequences.isEmpty()) {
-                return;
-            }
+    private void updatePlaylist(String streamId) {
+        TreeSet<Integer> sequences = streamSequences.get(streamId);
+        if (sequences == null || sequences.isEmpty()) {
+            return;
+        }
 
-            int mediaSequence = sequences.first();
-            List<StorageService> services = storageManager.getStoragesForStream(streamId);
-            Map<String, String> playlists = playlistContents.computeIfAbsent(streamId,
-                    k -> new ConcurrentHashMap<>());
-            Map<Integer, AdvertisementInfo> advertisements = advertisementSegments.getOrDefault(streamId,
-                    new ConcurrentHashMap<>());
+        int mediaSequence = sequences.first();
+        List<StorageService> services = storageManager.getStoragesForStream(streamId);
+        Map<String, String> playlists = playlistContents.computeIfAbsent(streamId, k -> new ConcurrentHashMap<>());
+        Map<Integer, AdvertisementInfo> advertisements = advertisementSegments.getOrDefault(streamId, new ConcurrentHashMap<>());
 
-            for (StorageService service : services) {
-                StringBuilder playlist = new StringBuilder();
-                playlist.append("#EXTM3U\n");
-                playlist.append("#EXT-X-VERSION:3\n");
-                playlist.append("#EXT-X-TARGETDURATION:").append(SEGMENT_DURATION).append("\n");
-                playlist.append("#EXT-X-MEDIA-SEQUENCE:").append(mediaSequence).append("\n");
+        // Calculate max duration for EXT-X-TARGETDURATION
+        int maxDuration = SEGMENT_DURATION;
+        for (AdvertisementInfo adInfo : advertisements.values()) {
+            maxDuration = Math.max(maxDuration, adInfo.getDuration());
+        }
 
-                for (Integer sequence : sequences) {
-                    // Reklam segmenti varsa ekle
-                    AdvertisementInfo adInfo = advertisements.get(sequence);
-                    if (adInfo != null && Files.exists(Path.of(adInfo.getPath()))) {
-                        String adSegmentName = "advertisement_" + sequence + ".ts";
-                        Path adSegmentPath = Path.of(adInfo.getPath(), adSegmentName);
-                        if (Files.exists(adSegmentPath)) {
-                            playlist.append("#EXTINF:").append(adInfo.getDuration()).append(".0,\n");
-                            playlist.append(service.getAdvertisementUrl(streamId, adSegmentName)).append("\n");
-                        }
-                    }
+        for (StorageService service : services) {
+            StringBuilder playlist = new StringBuilder();
+            playlist.append("#EXTM3U\n");
+            playlist.append("#EXT-X-VERSION:3\n");
+            playlist.append("#EXT-X-TARGETDURATION:").append(maxDuration).append("\n");
+            playlist.append("#EXT-X-MEDIA-SEQUENCE:").append(mediaSequence).append("\n");
+            playlist.append("#EXT-X-DISCONTINUITY-SEQUENCE:0\n"); // Add discontinuity sequence
 
-                    // Normal segmenti ekle
-                    String segmentName = String.format("segment_%d.ts", sequence);
-                    playlist.append("#EXTINF:").append(SEGMENT_DURATION).append(".0,\n");
-                    playlist.append(service.getSegmentUrl(streamId, segmentName)).append("\n");
+            for (Integer sequence : sequences) {
+                // Check for advertisement
+                AdvertisementInfo adInfo = advertisements.get(sequence);
+                if (adInfo != null && !adInfo.isProcessed()) {
+                    // Add discontinuity marker before advertisement
+                    playlist.append("#EXT-X-DISCONTINUITY\n");
+                    // Add advertisement segment
+                    playlist.append("#EXTINF:").append(adInfo.getDuration()).append(".0,\n");
+                    playlist.append(service.getAdvertisementUrl(streamId, adInfo.getSegmentName())).append("\n");
+                    // Add discontinuity marker after advertisement
+                    playlist.append("#EXT-X-DISCONTINUITY\n");
                 }
 
-                playlists.put(service.getStorageType().toLowerCase(), playlist.toString());
+                // Add regular segment
+                String segmentName = String.format("segment_%d.ts", sequence);
+                playlist.append("#EXTINF:").append(SEGMENT_DURATION).append(".0,\n");
+                playlist.append(service.getSegmentUrl(streamId, segmentName)).append("\n");
             }
 
-            long duration = System.currentTimeMillis() - startTime;
-            performanceLogger.info("Playlist updated in {} ms for streamId: {}", duration, streamId);
-        } catch (Exception e) {
-            long duration = System.currentTimeMillis() - startTime;
-            performanceLogger.error("Failed to update playlist in {} ms for streamId: {}",
-                    duration, streamId);
-            throw e;
+            playlists.put(service.getStorageType().toLowerCase(), playlist.toString());
         }
     }
 
     @CacheEvict(value = {"segments", "m3u8Urls"}, key = "#streamId")
     public void clearStreamCache(String streamId) {
-        long startTime = System.currentTimeMillis();
-        try {
-            streamSequences.remove(streamId);
-            playlistContents.remove(streamId);
-            advertisementSegments.remove(streamId);
-
-            long duration = System.currentTimeMillis() - startTime;
-            performanceLogger.info("Stream cache cleared in {} ms for streamId: {}", duration, streamId);
-        } catch (Exception e) {
-            long duration = System.currentTimeMillis() - startTime;
-            performanceLogger.error("Failed to clear stream cache in {} ms for streamId: {}",
-                    duration, streamId);
-            throw e;
-        }
+        streamSequences.remove(streamId);
+        playlistContents.remove(streamId);
+        advertisementSegments.remove(streamId);
     }
 
     private String generateEmptyPlaylist(int mediaSequence) {

@@ -6,4 +6,6 @@ import lombok.Data;
 public class AdvertisementInfo {
     private final String path;
     private final int duration;
+    private final String segmentName;
+    private final boolean processed;
 }

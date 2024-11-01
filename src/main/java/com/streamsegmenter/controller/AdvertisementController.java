@@ -32,8 +32,8 @@ public class AdvertisementController {
                     .type(AdvertisementRequest.Type.valueOf(type.toUpperCase()))
                     .build();
 
-            advertisementService.insertAdvertisement(request);
-            return ResponseEntity.ok("Advertisement inserted successfully");
+            String result = advertisementService.insertAdvertisement(request);
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
             log.error("Failed to insert advertisement", e);
             return ResponseEntity.internalServerError()

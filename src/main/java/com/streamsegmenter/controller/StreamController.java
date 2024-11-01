@@ -31,6 +31,7 @@ public class StreamController {
             scheduledStream.setStorageTypes(request.getStorageTypes());
             scheduledStream.setVideoQuality(request.getVideoQuality());
             scheduledStream.setStartTime(request.getStartTime());
+            scheduledStream.setWatermark(request.getWatermark());
 
             schedulerService.scheduleStream(scheduledStream);
             return ResponseEntity.accepted().body("Stream scheduled for " + request.getStartTime());

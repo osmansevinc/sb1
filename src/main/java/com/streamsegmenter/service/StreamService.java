@@ -202,25 +202,25 @@ public class StreamService {
         if (context != null) {
             context.setActive(false);
             ffmpegService.stopProcess(streamId);
-            m3u8Service.clearStreamCache(streamId);
 
-            // Clean up storages
-            List<StorageService> services = storageManager.getStoragesForStream(streamId);
-            for (StorageService service : services) {
-                try {
-                    service.deleteStream(streamId);
-                } catch (Exception e) {
-                    log.error("Error cleaning up storage for service {}: {}",
-                            service.getClass().getSimpleName(), e.getMessage());
-                }
-            }
-
-            // Clean up local files
-            cleanupStreamDirectory(streamId);
-            cleanupAdvertisementDirectory(streamId); // Advertisement klasörünü temizle
-            storageManager.removeStreamStorages(streamId);
-            processedSegments.remove(streamId);
         }
+        m3u8Service.clearStreamCache(streamId);
+        // Clean up storages
+        List<StorageService> services = storageManager.getStoragesForStream(streamId);
+        for (StorageService service : services) {
+            try {
+                service.deleteStream(streamId);
+            } catch (Exception e) {
+                log.error("Error cleaning up storage for service {}: {}",
+                        service.getClass().getSimpleName(), e.getMessage());
+            }
+        }
+
+        // Clean up local files
+        cleanupStreamDirectory(streamId);
+        cleanupAdvertisementDirectory(streamId); // Advertisement klasörünü temizle
+        storageManager.removeStreamStorages(streamId);
+        processedSegments.remove(streamId);
     }
 
     private void cleanupStreamDirectory(String streamId) {
