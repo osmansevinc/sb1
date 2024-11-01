@@ -18,6 +18,7 @@ public class FFmpegService {
     private static final Logger performanceLogger = LoggerFactory.getLogger("com.streamsegmenter.performance");
     private final ConcurrentHashMap<String, Process> activeProcesses = new ConcurrentHashMap<>();
     private final String ffmpegPath;
+    private static final int STANDARD_SEGMENT_DURATION = 5;
 
     public FFmpegService() {
         this.ffmpegPath = System.getProperty("os.name").toLowerCase().contains("win")
@@ -36,10 +37,8 @@ public class FFmpegService {
                 command.add("-i");
                 command.add(streamUrl);
 
-                // Watermark ekleme
                 if (watermark != null) {
                     if (watermark.getImagePath() != null) {
-                        // Resim watermark
                         command.add("-i");
                         command.add(watermark.getImagePath());
                         command.add("-filter_complex");
@@ -50,7 +49,6 @@ public class FFmpegService {
                                 watermark.getX(), watermark.getY()
                         ));
                     } else if (watermark.getText() != null) {
-                        // Metin watermark
                         command.add("-vf");
                         command.add(String.format(
                                 "drawtext=text='%s':fontsize=%d:fontcolor=%s@%f:x=%d:y=%d",
@@ -60,23 +58,20 @@ public class FFmpegService {
                     }
                 }
 
-                // Video kodlama ayarları
                 command.add("-c:v");
                 command.add("libx264");
                 command.add("-b:v");
                 command.add(quality.getVideoBitrateKbps() + "k");
 
-                // Ses kodlama ayarları
                 command.add("-c:a");
                 command.add("aac");
                 command.add("-b:a");
                 command.add(quality.getAudioBitrateKbps() + "k");
 
-                // Segmentleme ayarları
                 command.add("-f");
                 command.add("segment");
                 command.add("-segment_time");
-                command.add("5");
+                command.add(String.valueOf(STANDARD_SEGMENT_DURATION));
                 command.add("-segment_format");
                 command.add("mpegts");
                 command.add("-segment_list_size");
@@ -111,7 +106,7 @@ public class FFmpegService {
         });
     }
 
-    public void convertImageToVideo(Path imagePath, Path outputPath, int durationSeconds) {
+    public void convertImageToVideo(Path imagePath, Path outputPath, int durationSeconds, int startSegment) {
         long startTime = System.currentTimeMillis();
         try {
             List<String> command = new ArrayList<>();
@@ -121,16 +116,26 @@ public class FFmpegService {
             command.add("-i");
             command.add(imagePath.toString());
             command.add("-vf");
-            command.add("scale=trunc(iw/2)*2:trunc(ih/2)*2"); // Ensure even dimensions
-            command.add("-c:v");
-            command.add("libx264");
+            command.add("scale=trunc(iw/2)*2:trunc(ih/2)*2");
             command.add("-t");
             command.add(String.valueOf(durationSeconds));
             command.add("-pix_fmt");
             command.add("yuv420p");
-            command.add("-f");
-            command.add("mpegts");
-            command.add(outputPath.toString());
+
+            // Eğer süre 5 saniyeden büyükse segmentlere böl
+            if (durationSeconds > STANDARD_SEGMENT_DURATION) {
+                command.add("-f");
+                command.add("segment");
+                command.add("-segment_time");
+                command.add(String.valueOf(STANDARD_SEGMENT_DURATION));
+                command.add("-segment_format");
+                command.add("mpegts");
+                command.add(outputPath.getParent().resolve(String.format("advertisement_%d_%%d.ts", startSegment)).toString());
+            } else {
+                command.add("-f");
+                command.add("mpegts");
+                command.add(outputPath.toString());
+            }
 
             log.debug("Starting image conversion with command: {}", String.join(" ", command));
             Process process = new ProcessBuilder(command)
@@ -159,19 +164,34 @@ public class FFmpegService {
             command.add(ffmpegPath);
             command.add("-i");
             command.add(videoPath.toString());
-            command.add("-c");
-            command.add("copy");
 
-            // Duration parametresi
+            // Video kodek ayarları
+            command.add("-c:v");
+            command.add("libx264");
+            command.add("-c:a");
+            command.add("aac");
+
             if (durationSeconds > 0) {
                 command.add("-t");
                 command.add(String.valueOf(durationSeconds));
             }
 
-            // Output format ve dosya
-            command.add("-f");
-            command.add("mpegts");
-            command.add(outputPath.toString());
+            // Eğer süre 5 saniyeden büyükse segmentlere böl
+            if (durationSeconds > STANDARD_SEGMENT_DURATION) {
+                command.add("-f");
+                command.add("segment");
+                command.add("-segment_time");
+                command.add(String.valueOf(STANDARD_SEGMENT_DURATION));
+                command.add("-segment_format");
+                command.add("mpegts");
+                command.add("-segment_list_size");
+                command.add("0");
+                command.add(outputPath.getParent().resolve(String.format("advertisement_%d_%%d.ts", startSegment)).toString());
+            } else {
+                command.add("-f");
+                command.add("mpegts");
+                command.add(outputPath.toString());
+            }
 
             log.debug("Starting video conversion with command: {}", String.join(" ", command));
             Process process = new ProcessBuilder(command)
@@ -198,7 +218,6 @@ public class FFmpegService {
         if (process != null && process.isAlive()) {
             try {
                 process.destroy();
-                // Force kill if not terminated within 5 seconds
                 if (process.isAlive()) {
                     Thread.sleep(5000);
                     process.destroyForcibly();

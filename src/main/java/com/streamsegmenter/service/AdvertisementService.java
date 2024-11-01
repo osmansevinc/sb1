@@ -3,7 +3,6 @@ package com.streamsegmenter.service;
 import com.streamsegmenter.config.StorageConfig;
 import com.streamsegmenter.model.AdvertisementRequest;
 import com.streamsegmenter.model.ScheduledStream;
-import com.streamsegmenter.model.StreamContext;
 import com.streamsegmenter.service.impl.LocalStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,10 +24,11 @@ public class AdvertisementService {
     private final StorageConfig config;
     private final FFmpegService ffmpegService;
     private final M3u8Service m3u8Service;
-    private final StreamService streamService;
     private final StorageManager storageManager;
+    private final StreamService streamService;
     private final StreamSchedulerService streamSchedulerService;
     private final ConcurrentHashMap<String, ConcurrentHashMap<Integer, String>> streamAdvertisements = new ConcurrentHashMap<>();
+    private static final String ADVERTISEMENT_PREFIX = "advertisement";
 
     public String insertAdvertisement(AdvertisementRequest request) {
         long startTime = System.currentTimeMillis();
@@ -40,20 +40,21 @@ public class AdvertisementService {
             Path tempFile = Files.createTempFile("ad-", getExtension(request.getFile().getOriginalFilename()));
             request.getFile().transferTo(tempFile.toFile());
 
-            Path outputDir = config.resolvePath("advertisements", request.getStreamId());
+            Path outputDir = config.resolvePath("streams", request.getStreamId());
             Files.createDirectories(outputDir);
 
             CompletableFuture<Void> processingFuture;
+            Path outputPath = outputDir.resolve(ADVERTISEMENT_PREFIX + "_" + request.getStartSegment() + ".ts");
 
             switch (request.getType()) {
                 case IMAGE:
-                    processingFuture = processImage(tempFile, outputDir, request);
+                    processingFuture = processImage(tempFile, outputPath, request);
                     break;
                 case VIDEO:
-                    processingFuture = processVideo(tempFile, outputDir, request);
+                    processingFuture = processVideo(tempFile, outputPath, request);
                     break;
                 case TS_FILE:
-                    processingFuture = processTs(tempFile, outputDir, request);
+                    processingFuture = processTs(tempFile, outputPath, request);
                     break;
                 default:
                     throw new IllegalArgumentException("Unsupported advertisement type");
@@ -61,9 +62,8 @@ public class AdvertisementService {
 
             processingFuture.thenRun(() -> {
                 try {
-                    // Upload advertisement to all active storages
                     uploadAdvertisementToStorages(request.getStreamId(), outputDir, request.getStartSegment());
-                    registerAdvertisement(request.getStreamId(), request.getStartSegment(), outputDir.toString(),request.getDuration());
+                    registerAdvertisement(request.getStreamId(), request.getStartSegment(), outputDir.toString(), request.getDuration());
                     long duration = System.currentTimeMillis() - startTime;
                     log.info("Advertisement processing completed in {} ms", duration);
                 } catch (Exception e) {
@@ -96,33 +96,37 @@ public class AdvertisementService {
 
     private void uploadAdvertisementToStorages(String streamId, Path adDir, int segmentNumber) {
         List<StorageService> services = storageManager.getStoragesForStream(streamId);
-        String adSegmentName = "advertisement_" + segmentNumber + ".ts";
-        Path adSegmentPath = adDir.resolve(adSegmentName);
 
-        if (!Files.exists(adSegmentPath)) {
-            log.warn("Advertisement segment not found: {}", adSegmentPath);
+        // Birden fazla segment olabilir
+        File[] adSegments = adDir.toFile().listFiles((dir, name) ->
+                name.startsWith(ADVERTISEMENT_PREFIX + "_" + segmentNumber) && name.endsWith(".ts"));
+
+        if (adSegments == null || adSegments.length == 0) {
+            log.warn("No advertisement segments found in: {}", adDir);
             return;
         }
 
-        for (StorageService service : services) {
-            if (!(service instanceof LocalStorageService)) { // Local storage already has the file
-                try {
-                    service.uploadSegment(adSegmentPath, streamId).get(); // Wait for upload
-                    log.info("Advertisement uploaded to storage: {}", service.getStorageType());
-                } catch (Exception e) {
-                    log.error("Failed to upload advertisement to storage {}: {}",
-                            service.getStorageType(), e.getMessage());
+        for (File segment : adSegments) {
+            for (StorageService service : services) {
+                if (!(service instanceof LocalStorageService)) {
+                    try {
+                        service.uploadSegment(segment.toPath(), streamId).get();
+                        log.info("Advertisement segment {} uploaded to storage: {}",
+                                segment.getName(), service.getStorageType());
+                    } catch (Exception e) {
+                        log.error("Failed to upload advertisement to storage {}: {}",
+                                service.getStorageType(), e.getMessage());
+                    }
                 }
             }
         }
     }
 
-    private CompletableFuture<Void> processImage(Path imagePath, Path outputDir,
+    private CompletableFuture<Void> processImage(Path imagePath, Path outputPath,
                                                  AdvertisementRequest request) {
         return CompletableFuture.runAsync(() -> {
             try {
-                Path outputPath = outputDir.resolve("advertisement_" + request.getStartSegment() + ".ts");
-                ffmpegService.convertImageToVideo(imagePath, outputPath, request.getDuration());
+                ffmpegService.convertImageToVideo(imagePath, outputPath, request.getDuration(), request.getStartSegment());
             } catch (Exception e) {
                 log.error("Failed to process image advertisement", e);
                 throw new RuntimeException(e);
@@ -130,11 +134,10 @@ public class AdvertisementService {
         });
     }
 
-    private CompletableFuture<Void> processVideo(Path videoPath, Path outputDir,
+    private CompletableFuture<Void> processVideo(Path videoPath, Path outputPath,
                                                  AdvertisementRequest request) {
         return CompletableFuture.runAsync(() -> {
             try {
-                Path outputPath = outputDir.resolve("advertisement_" + request.getStartSegment() + ".ts");
                 ffmpegService.convertVideoToSegments(videoPath, outputPath,
                         request.getStartSegment(), request.getDuration());
             } catch (Exception e) {
@@ -144,12 +147,11 @@ public class AdvertisementService {
         });
     }
 
-    private CompletableFuture<Void> processTs(Path tsPath, Path outputDir,
+    private CompletableFuture<Void> processTs(Path tsPath, Path outputPath,
                                               AdvertisementRequest request) {
         return CompletableFuture.runAsync(() -> {
             try {
-                Path targetPath = outputDir.resolve("advertisement_" + request.getStartSegment() + ".ts");
-                Files.copy(tsPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                Files.copy(tsPath, outputPath, StandardCopyOption.REPLACE_EXISTING);
             } catch (Exception e) {
                 log.error("Failed to process TS advertisement", e);
                 throw new RuntimeException(e);
@@ -158,10 +160,9 @@ public class AdvertisementService {
     }
 
     private void registerAdvertisement(String streamId, int segmentNumber, String path, int duration) {
-        m3u8Service.registerAdvertisement(streamId,segmentNumber,path,duration);
+        m3u8Service.registerAdvertisement(streamId, segmentNumber, path, duration);
         streamAdvertisements.computeIfAbsent(streamId, k -> new ConcurrentHashMap<>())
                 .put(segmentNumber, path);
-        //m3u8Service.updatePlaylist(streamId);
     }
 
     public void removeAdvertisement(String streamId, int startSegment, int endSegment) {
@@ -175,7 +176,7 @@ public class AdvertisementService {
                     // Remove from all storages
                     for (StorageService service : services) {
                         try {
-                            String adSegmentName = "advertisement_" + i + ".ts";
+                            String adSegmentName = ADVERTISEMENT_PREFIX + "_" + i + ".ts";
                             service.deleteSegment(streamId, adSegmentName);
                         } catch (Exception e) {
                             log.error("Failed to delete advertisement from storage {}: {}",
@@ -191,8 +192,6 @@ public class AdvertisementService {
                     }
                 }
             }
-            //remove from m3u8service
-            //m3u8Service.updatePlaylist(streamId);
         }
     }
 

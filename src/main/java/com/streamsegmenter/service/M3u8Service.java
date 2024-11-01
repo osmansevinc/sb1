@@ -49,11 +49,26 @@ public class M3u8Service {
     }
 
     public void registerAdvertisement(String streamId, int segmentNumber, String segmentPath, int duration) {
-        String adSegmentName = "advertisement_" + segmentNumber + ".ts";
-        advertisementSegments.computeIfAbsent(streamId, k -> new ConcurrentHashMap<>())
-                .put(segmentNumber, new AdvertisementInfo(segmentPath, duration, adSegmentName, false));
+        int totalSegments = (int) Math.ceil(duration / (double) SEGMENT_DURATION);
+        Map<Integer, AdvertisementInfo> streamAds = advertisementSegments.computeIfAbsent(streamId, k -> new ConcurrentHashMap<>());
+
+        if (duration <= SEGMENT_DURATION) {
+            String adSegmentName = String.format("advertisement_%d.ts", segmentNumber);
+            streamAds.put(segmentNumber, new AdvertisementInfo(segmentPath, duration, adSegmentName, false));
+        } else {
+            for (int i = 0; i < totalSegments; i++) {
+                int currentSegment = segmentNumber + i;
+                int segmentDuration = (i == totalSegments - 1)
+                        ? duration - (i * SEGMENT_DURATION)
+                        : SEGMENT_DURATION;
+
+                String adSegmentName = String.format("advertisement_%d_%d.ts", segmentNumber, i);
+                streamAds.put(currentSegment, new AdvertisementInfo(segmentPath, segmentDuration, adSegmentName, false));
+            }
+        }
+
         updatePlaylist(streamId);
-        log.info("Registered advertisement for stream {} at segment {}, duration: {}s",
+        log.info("Registered advertisement for stream {} starting at segment {}, total duration: {}s",
                 streamId, segmentNumber, duration);
     }
 
@@ -81,7 +96,6 @@ public class M3u8Service {
             throw e;
         }
     }
-
 
     @CacheEvict(value = "segments", key = "#streamId")
     public synchronized void addSegment(String streamId, String segmentName) {
@@ -119,7 +133,6 @@ public class M3u8Service {
         Map<String, String> playlists = playlistContents.computeIfAbsent(streamId, k -> new ConcurrentHashMap<>());
         Map<Integer, AdvertisementInfo> advertisements = advertisementSegments.getOrDefault(streamId, new ConcurrentHashMap<>());
 
-        // Calculate max duration for EXT-X-TARGETDURATION
         int maxDuration = SEGMENT_DURATION;
         for (AdvertisementInfo adInfo : advertisements.values()) {
             maxDuration = Math.max(maxDuration, adInfo.getDuration());
@@ -131,25 +144,28 @@ public class M3u8Service {
             playlist.append("#EXT-X-VERSION:3\n");
             playlist.append("#EXT-X-TARGETDURATION:").append(maxDuration).append("\n");
             playlist.append("#EXT-X-MEDIA-SEQUENCE:").append(mediaSequence).append("\n");
-            playlist.append("#EXT-X-DISCONTINUITY-SEQUENCE:0\n"); // Add discontinuity sequence
+            playlist.append("#EXT-X-DISCONTINUITY-SEQUENCE:0\n");
 
+            boolean wasAdvertisement = false;
             for (Integer sequence : sequences) {
-                // Check for advertisement
                 AdvertisementInfo adInfo = advertisements.get(sequence);
-                if (adInfo != null && !adInfo.isProcessed()) {
-                    // Add discontinuity marker before advertisement
-                    playlist.append("#EXT-X-DISCONTINUITY\n");
-                    // Add advertisement segment
-                    playlist.append("#EXTINF:").append(adInfo.getDuration()).append(".0,\n");
-                    playlist.append(service.getAdvertisementUrl(streamId, adInfo.getSegmentName())).append("\n");
-                    // Add discontinuity marker after advertisement
-                    playlist.append("#EXT-X-DISCONTINUITY\n");
-                }
 
-                // Add regular segment
-                String segmentName = String.format("segment_%d.ts", sequence);
-                playlist.append("#EXTINF:").append(SEGMENT_DURATION).append(".0,\n");
-                playlist.append(service.getSegmentUrl(streamId, segmentName)).append("\n");
+                if (adInfo != null) {
+                    if (!wasAdvertisement) {
+                        playlist.append("#EXT-X-DISCONTINUITY\n");
+                    }
+                    playlist.append("#EXTINF:").append(adInfo.getDuration()).append(".0,\n");
+                    playlist.append(service.getSegmentUrl(streamId, adInfo.getSegmentName())).append("\n");
+                    wasAdvertisement = true;
+                } else {
+                    if (wasAdvertisement) {
+                        playlist.append("#EXT-X-DISCONTINUITY\n");
+                    }
+                    String segmentName = String.format("segment_%d.ts", sequence);
+                    playlist.append("#EXTINF:").append(SEGMENT_DURATION).append(".0,\n");
+                    playlist.append(service.getSegmentUrl(streamId, segmentName)).append("\n");
+                    wasAdvertisement = false;
+                }
             }
 
             playlists.put(service.getStorageType().toLowerCase(), playlist.toString());
